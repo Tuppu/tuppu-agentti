@@ -10,7 +10,7 @@ import { pipeline } from '@xenova/transformers';
 
 /**
  * -----------------------------------------
- *  Perusasetukset
+ *  Basic configuration
  * -----------------------------------------
  */
 const BLOG = 'https://tuppu.fi';
@@ -23,12 +23,12 @@ const RSSS = [
   `${BLOG}/category/luonto/feed/`,
 ];
 
-// Paikallisen LLM-palvelimen (llama.cpp) osoite – OpenAI-yhteensopiva.
+// Local LLM server (llama.cpp) – OpenAI-compatible.
 const LLM_BASE = process.env.LLM_BASE ?? 'http://127.0.0.1:8080/v1';
 
 /**
  * -----------------------------------------
- *  Tietokanta ja migraatio
+ *  Database & migration
  * -----------------------------------------
  */
 const db = new Database('tuppu.db');
@@ -36,7 +36,9 @@ db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 
 function tableExists(name: string): boolean {
-  const row = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(name) as any;
+  const row = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+  .get(name) as any;
   return !!row;
 }
 function tableHasColumn(table: string, col: string): boolean {
@@ -44,7 +46,7 @@ function tableHasColumn(table: string, col: string): boolean {
   return rows.some(r => r.name === col);
 }
 
-// 1) Jos taulua ei ole, luodaan uusin skeema
+// 1) If the table doesn't exist, create the latest schema
 if (!tableExists('docs')) {
   db.exec(`
     CREATE TABLE docs (
@@ -58,7 +60,7 @@ if (!tableExists('docs')) {
   `);
 }
 
-// 2) Jos vanha skeema (ilman chunk_index), migroidaan
+// 2) If there is an old schema (without chunk_index), migrate
 if (!tableHasColumn('docs', 'chunk_index')) {
   db.exec(`ALTER TABLE docs RENAME TO docs_old;`);
   db.exec(`
@@ -80,7 +82,7 @@ if (!tableHasColumn('docs', 'chunk_index')) {
   db.exec(`DROP TABLE docs_old;`);
 }
 
-// 3) Indeksit
+// 3) Indexes
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_docs_url ON docs(url);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_url_chunk ON docs(url, chunk_index);
@@ -88,7 +90,7 @@ db.exec(`
 
 /**
  * -----------------------------------------
- *  Apurit
+ *  Utilities
  * -----------------------------------------
  */
 function strip(html: string) {
@@ -132,7 +134,7 @@ function chunk(text: string, size = 900, overlap = 180): string[] {
 
 /**
  * -----------------------------------------
- *  Paikalliset mallit (Xenova)
+ *  Local models (Xenova)
  * -----------------------------------------
  */
 let embedderPromise: Promise<any> | null = null;
@@ -162,14 +164,13 @@ async function summarize(text: string) {
 
 /**
  * -----------------------------------------
- *  Paikallinen LLM generaattori (llama.cpp /chat/completions)
+ *  Local LLM generator (llama.cpp /chat/completions)
  * -----------------------------------------
  */
-// lisää tämän funktion yläpuolelle pikkutyyppi
 type ChatCompletionResponse = {
   choices?: Array<{
     message?: { content?: string } | null;
-    // jotkin serverit palauttavat myös 'text'
+    // some servers return 'text' for compatibility
     text?: string;
   }>;
 };
@@ -211,10 +212,9 @@ async function generateWithLocalLLM(
       throw new Error(`LLM HTTP ${r.status}: ${txt}`);
     }
 
-    // 🔧 TYYPITETTY JSON
     const j = (await r.json()) as ChatCompletionResponse;
 
-    // suvaitsevainen purku (llama.cpp saattaa palauttaa 'text' joissakin buildeissa)
+    // permissive extraction (llama.cpp builds may return 'text')
     const choice = j.choices?.[0];
     const fromMessage = choice?.message?.content?.trim();
     const fromText = (choice as any)?.text?.trim?.(); // fallback
@@ -227,14 +227,14 @@ async function generateWithLocalLLM(
   }
 }
 
-
 /**
  * -----------------------------------------
- *  WP/RSS – sisällön haku
+ *  WP/RSS — content fetch
  * -----------------------------------------
  */
 async function fetchAllPosts(): Promise<Array<{ url: string; title: string; content: string }>> {
   const out: Array<{ url: string; title: string; content: string }> = [];
+
   // WordPress REST
   for (let page = 1; page <= 20; page++) {
     const r = await fetch(WP_POSTS + page);
@@ -249,7 +249,8 @@ async function fetchAllPosts(): Promise<Array<{ url: string; title: string; cont
       });
     }
   }
-  // RSS fallback
+
+  // RSS fallback if REST returns nothing
   if (out.length === 0) {
     const xmls = await Promise.allSettled(RSSS.map((u) => fetch(u).then((r) => r.text())));
     for (const r of xmls) {
@@ -273,14 +274,15 @@ async function fetchAllPosts(): Promise<Array<{ url: string; title: string; cont
       }
     }
   }
-  // deduplikoi urlin mukaan
+
+  // Deduplicate by URL
   const seen = new Set<string>();
   return out.filter((d) => !seen.has(d.url) && seen.add(d.url));
 }
 
 /**
  * -----------------------------------------
- *  Indeksointi (chunk-tasolla)
+ *  Indexing (at chunk level)
  * -----------------------------------------
  */
 async function indexAll() {
@@ -303,7 +305,7 @@ async function indexAll() {
           const vec = await embed(`${d.title}\n\n${parts[i]}`);
           ins.run(d.url, d.title, i, parts[i], arrToBuf(vec));
         }
-        console.log('Indeksoitu:', d.title, `(${parts.length} osaa)`);
+        console.log('Indexed:', d.title, `(${parts.length} chunk(s))`);
       })
     )
   );
@@ -311,7 +313,7 @@ async function indexAll() {
 
 /**
  * -----------------------------------------
- *  Haku ja vastaus
+ *  Retrieval + answer
  * -----------------------------------------
  */
 function searchVectors(queryVec: number[], question: string, k = 10) {
@@ -348,7 +350,7 @@ async function answer(question: string) {
   const strictHits = goodHits.filter(h => must.some(m => h.content.toLowerCase().includes(m)));
 
   if (!strictHits.length) {
-    return `En löytänyt Tuppu.fi-sisällöstä vastausta aiheeseen.\n\nLähteet:\n(tyhjää)`;
+    return `No answer found in Tuppu.fi content.\n\nSources:\n(none)`;
   }
 
   const top = strictHits.slice(0, 3);
@@ -361,18 +363,17 @@ async function answer(question: string) {
     return `[${i+1}] ${h.title}\n${h.url}\n---\n${excerpt}`;
   }).join('\n\n');
 
-  const system = `Olet Tuppu.fi-agentti. Vastaa suomeksi selkeästi ja tiiviisti käyttäen VAIN annettua kontekstia.
-Jos vastausta ei löydy kontekstista, sano: "Ei löydy Tuppu.fi:stä." ja kerro säästä. Jos ei muuta tietoa, kerro että sää on [säätila].
-Lisää lopuksi "Lähteet:"-osioon viitelista.`;
+  const system = `You are the Tuppu.fi Agent. Answer in clear, concise English using ONLY the provided context.
+If the answer cannot be found in the context, reply exactly: "Not found on Tuppu.fi." and include a Sources section. Always include a "Sources:" list of the referenced pages.`;
 
-  const user = `Kysymys: ${question}
+  const user = `Question: ${question}
 
-Konteksti (vain tästä saa tietoa):
+Context (only use this information):
 ${context}
 
-Kirjoita 3–6 lauseen vastaus. Jos lähteissä ei ole tietoa aiheesta, ilmoita suoraan ettei löydy.`;
+Write a 3–6 sentence answer. If the sources do not cover the topic, state it directly.`;
 
-  // Generoi vastaus LLM:llä, fallback summarizeriin
+  // Try LLM; fall back to summarizer if the LLM call fails
   let text: string;
   try {
     text = await generateWithLocalLLM(system, user, { maxTokens: 500, temperature: 0.2, timeoutMs: 25000 });
@@ -382,28 +383,21 @@ Kirjoita 3–6 lauseen vastaus. Jos lähteissä ei ole tietoa aiheesta, ilmoita 
   }
 
   const links = top.map(h => `- ${h.title} — ${h.url}`).join('\n');
-  return `${text}\n\nLähteet:\n${links}`;
+  return `${text}\n\nSources:\n${links}`;
 }
 
 /**
  * -----------------------------------------
- *  HTTP API + selain-UI
+ *  HTTP API + minimal browser UI
  * -----------------------------------------
  */
 const app = express();
 app.use(express.json());
 
+// health
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-app.post('/reindex', async (_req, res) => {
-  try {
-    await indexAll();
-    res.json({ ok: true });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
+// Q&A
 app.post('/ask', async (req, res) => {
   const q = (req.body?.q ?? '').toString().trim();
   if (!q) return res.status(400).json({ error: 'Missing q' });
@@ -415,15 +409,14 @@ app.post('/ask', async (req, res) => {
   }
 });
 
-
-// Pieni HTML-käyttöliittymä
+// simple UI at root
 app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
-<html lang="fi">
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Tuppu-agentti</title>
+<title>Tuppu Agent</title>
 <style>
   :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
   body { margin: 24px; }
@@ -437,13 +430,13 @@ app.get('/', (_req, res) => {
 </style>
 </head>
 <body>
-  <h1>Tuppu-agentti</h1>
+  <h1>Tuppu Agent</h1>
   <div class="card">
-    <label for="q"><b>Kysymys</b></label>
-    <textarea id="q" placeholder="Mitä blogi kertoo..."></textarea>
-    <button id="ask">Kysy</button>
+    <label for="q"><b>Question</b></label>
+    <textarea id="q" placeholder="Ask anything about the blog..."></textarea>
+    <button id="ask">Ask</button>
     <div id="out" style="margin-top:14px;"></div>
-    <p class="muted">Vinkki: jos vastauksia ei tule, varmista että llama.cpp serveri on käynnissä portissa 8080.</p>
+    <p class="muted">Tip: if answers don't appear, make sure your llama.cpp server is running on port 8080.</p>
   </div>
 <script>
   const q = document.getElementById('q');
@@ -453,14 +446,14 @@ app.get('/', (_req, res) => {
     const text = q.value.trim();
     if (!text) return;
     btn.disabled = true;
-    out.innerHTML = '<em>Kysytään…</em>';
+    out.innerHTML = '<em>Asking…</em>';
     try {
       const r = await fetch('/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ q: text }) });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || r.statusText);
       out.innerHTML = '<pre>' + (j.answer || '') + '</pre>';
     } catch (e) {
-      out.innerHTML = '<pre style="color:#b91c1c">Virhe: ' + e + '</pre>';
+      out.innerHTML = '<pre style="color:#b91c1c">Error: ' + e + '</pre>';
     } finally {
       btn.disabled = false;
     }
@@ -472,55 +465,12 @@ app.get('/', (_req, res) => {
 
 /**
  * -----------------------------------------
- *  Käynnistys
+ *  Boot
  * -----------------------------------------
  */
 const PORT = Number(process.env.PORT ?? 3000);
-// Pieni HTML-käyttöliittymä juureen
-app.get('/', (_req, res) => {
-  res.type('html').send(`<!doctype html>
-<html lang="fi"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Tuppu-agentti</title>
-<style>
-  :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-  body { margin: 24px; max-width: 900px; }
-  textarea { width: 100%; height: 100px; padding: 10px; border-radius: 10px; border:1px solid #ccc; }
-  button { margin-top: 10px; padding: 10px 16px; border: 0; border-radius: 10px; background:#0ea5e9; color:#fff; }
-  pre { white-space: pre-wrap; background:#fafafa; border:1px solid #eee; padding:12px; border-radius:10px; }
-</style></head>
-<body>
-  <h1>Tuppu-agentti</h1>
-  <textarea id="q" placeholder="Kysy blogilta..."></textarea>
-  <button id="ask">Kysy</button>
-  <div id="out" style="margin-top:14px;"></div>
-<script>
-  const btn=document.getElementById('ask'), q=document.getElementById('q'), out=document.getElementById('out');
-  btn.onclick=async ()=>{
-    const text=q.value.trim(); if(!text) return;
-    btn.disabled=true; out.innerHTML='<em>Kysytään…</em>';
-    try{
-      const r=await fetch('/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({q:text})});
-      const j=await r.json(); if(!r.ok) throw new Error(j?.error||r.statusText);
-      out.innerHTML='<pre>'+ (j.answer||'') +'</pre>';
-    }catch(e){ out.innerHTML='<pre style="color:#b91c1c">Virhe: '+e+'</pre>'; }
-    finally{ btn.disabled=false; }
-  };
-</script>
-</body></html>`);
-});
 
 app.listen(PORT, async () => {
-  console.log(`Tuppu-agentti kuuntelee :${PORT}`);
+  console.log(`Tuppu Agent listening on :${PORT}`);
   await indexAll();
-});
-
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
-app.post('/reindex', async (_req, res) => {
-    try {
-        await indexAll();
-        res.json({ ok: true });
-    } catch (e: any) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
 });
