@@ -397,6 +397,16 @@ app.use(express.json());
 // health
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
+// re-index
+app.post('/reindex', async (_req, res) => {
+    try {
+        await indexAll();
+        res.json({ ok: true });
+    } catch (e: any) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
 // Q&A
 app.post('/ask', async (req, res) => {
   const q = (req.body?.q ?? '').toString().trim();
