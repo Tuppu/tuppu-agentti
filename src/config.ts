@@ -14,7 +14,8 @@ export const RSSS = [
 ];
 
 // Local LLM server (llama.cpp) – OpenAI-compatible.
-export const LLM_BASE = process.env.LLM_BASE ?? 'http://127.0.0.1:8080/v1';
+export const LLM_BASE = process.env.LLM_BASE ?? 'http://localhost:11434/v1';
+export const LLM_MODEL = process.env.LLM_MODEL ?? 'phi3';
 
 export const PORT = Number(process.env.PORT ?? 3000);
 

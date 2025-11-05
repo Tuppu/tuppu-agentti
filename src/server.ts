@@ -1,7 +1,7 @@
 import express from 'express';
 import { indexAll } from './indexer.js';
 import { answer } from './retrieval.js';
-import { generateArticle, postToWordPress, generateAndPost } from './wordpress.js';
+import { generateArticle, postToWordPress, generateAndPost, testWordPressCredentials } from './wordpress.js';
 
 /**
  * HTTP API and browser UI
@@ -77,6 +77,16 @@ app.post('/generate-and-post', async (req, res) => {
     }
 
     const result = await generateAndPost({ keywords, category, tone, length }, status);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Test WordPress credentials
+app.get('/test-wordpress', async (_req, res) => {
+  try {
+    const result = await testWordPressCredentials();
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message });

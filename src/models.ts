@@ -1,6 +1,6 @@
 import { pipeline } from '@xenova/transformers';
 import fetch from 'node-fetch';
-import { LLM_BASE } from './config.js';
+import { LLM_BASE, LLM_MODEL } from './config.js';
 
 /**
  * Local models (Xenova) and LLM integration
@@ -64,7 +64,7 @@ export async function generateWithLocalLLM(
   const timeoutMs = opts?.timeoutMs ?? 25_000;
 
   const body = {
-    model: 'local-llm',
+    model: LLM_MODEL,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },

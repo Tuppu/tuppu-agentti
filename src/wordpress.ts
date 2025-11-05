@@ -99,7 +99,7 @@ Generate ONE title only. Make it engaging and relevant. Do not add quotes or ext
   const title = await generateWithLocalLLM(titleSystem, titlePrompt, {
     maxTokens: 100,
     temperature: 0.7,
-    timeoutMs: 15000,
+    timeoutMs: 15000000,
   });
 
   // Generate main article content
@@ -127,7 +127,7 @@ Write in plain text paragraphs (no markdown headers). Make it informative and en
   const content = await generateWithLocalLLM(contentSystem, contentPrompt, {
     maxTokens: length === 'long' ? 2000 : length === 'medium' ? 1200 : 800,
     temperature: 0.7,
-    timeoutMs: 60000,
+    timeoutMs: 60000000,
   });
 
   // Generate excerpt
@@ -144,7 +144,7 @@ Write an engaging excerpt that captures the main point.`;
   const excerpt = await generateWithLocalLLM(excerptSystem, excerptPrompt, {
     maxTokens: 100,
     temperature: 0.6,
-    timeoutMs: 15000,
+    timeoutMs: 15000000,
   });
 
   // Collect sources
@@ -159,6 +159,44 @@ Write an engaging excerpt that captures the main point.`;
     excerpt: excerpt.trim(),
     sources,
   };
+}
+
+/**
+ * Test WordPress credentials
+ */
+export async function testWordPressCredentials() {
+  if (!WP_USERNAME || !WP_PASSWORD) {
+    return { success: false, error: 'WordPress credentials not configured. Set WP_USERNAME and WP_PASSWORD in .env file' };
+  }
+
+  const auth = Buffer.from(`${WP_USERNAME}:${WP_PASSWORD}`).toString('base64');
+
+  try {
+    const response = await fetch(`${WP_API_BASE}/users/me`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      return { success: false, error: `Authentication failed (${response.status}): ${errorText}` };
+    }
+
+    const user = await response.json() as any;
+    return {
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        capabilities: user.capabilities,
+      }
+    };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
 }
 
 /**
