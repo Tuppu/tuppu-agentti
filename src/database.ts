@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
  * Database setup and migration
  */
 
-export const db = new Database('tuppu.db');
+export const db: Database.Database = new Database('tuppu.db');
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 
