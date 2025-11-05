@@ -10,9 +10,15 @@ export const RSSS = [
   `${BLOG}/category/talous/feed/`,
   `${BLOG}/category/tiede/feed/`,
   `${BLOG}/category/luonto/feed/`,
+  `${BLOG}/category/oma-elama/feed/`,
 ];
 
 // Local LLM server (llama.cpp) – OpenAI-compatible.
 export const LLM_BASE = process.env.LLM_BASE ?? 'http://127.0.0.1:8080/v1';
 
 export const PORT = Number(process.env.PORT ?? 3000);
+
+// WordPress credentials (set these in .env file)
+export const WP_USERNAME = process.env.WP_USERNAME ?? '';
+export const WP_PASSWORD = process.env.WP_PASSWORD ?? '';
+export const WP_API_BASE = `${BLOG}/wp-json/wp/v2`;
