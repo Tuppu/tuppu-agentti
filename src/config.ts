@@ -4,14 +4,8 @@
 
 export const BLOG = 'https://tuppu.fi';
 export const WP_POSTS = `${BLOG}/wp-json/wp/v2/posts?_fields=id,link,slug,title,content,excerpt,date,modified&per_page=100&page=`;
-export const RSSS = [
-  `${BLOG}/feed/`,
-  `${BLOG}/category/politiikka/feed/`,
-  `${BLOG}/category/talous/feed/`,
-  `${BLOG}/category/tiede/feed/`,
-  `${BLOG}/category/luonto/feed/`,
-  `${BLOG}/category/oma-elama/feed/`,
-];
+export const WP_CATEGORIES = `${BLOG}/wp-json/wp/v2/categories?per_page=100`;
+export const MAIN_RSS = `${BLOG}/feed/`;
 
 // Local LLM server (llama.cpp) – OpenAI-compatible.
 export const LLM_BASE = process.env.LLM_BASE ?? 'http://localhost:11434/v1';

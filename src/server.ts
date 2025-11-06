@@ -221,7 +221,7 @@ app.get('/', (_req, res) => {
     }
 
     generateBtn.disabled = true;
-    articleOut.innerHTML = '<em>Generating article... This may take 30-60 seconds...</em>';
+    articleOut.innerHTML = '<em>Generating article... This may take some minutes...</em>';
     
     try {
       const r = await fetch('/generate-article', {

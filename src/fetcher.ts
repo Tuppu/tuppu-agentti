@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { WP_POSTS, RSSS } from './config.js';
+import { WP_POSTS, WP_CATEGORIES, MAIN_RSS, BLOG } from './config.js';
 import { strip } from './utils.js';
 
 /**
@@ -10,6 +10,37 @@ export interface Post {
   url: string;
   title: string;
   content: string;
+}
+
+/**
+ * Fetch all category RSS feed URLs dynamically from WordPress API
+ */
+async function fetchRSSFeeds(): Promise<string[]> {
+  const feeds: string[] = [MAIN_RSS]; // Always include main feed
+  
+  try {
+    console.log('Fetching categories from WordPress API...');
+    const response = await fetch(WP_CATEGORIES);
+    if (!response.ok) {
+      console.warn('Failed to fetch categories, using only main feed');
+      return feeds;
+    }
+    
+    const categories = (await response.json()) as any[];
+    console.log(`Found ${categories.length} categories`);
+    
+    for (const cat of categories) {
+      if (cat.slug && cat.count > 0) { // Only include categories with posts
+        feeds.push(`${BLOG}/category/${cat.slug}/feed/`);
+      }
+    }
+    
+    console.log(`Generated ${feeds.length} RSS feed URLs`);
+    return feeds;
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    return feeds; // Return at least the main feed
+  }
 }
 
 /**
@@ -35,7 +66,8 @@ export async function fetchAllPosts(): Promise<Post[]> {
 
   // RSS fallback if REST returns nothing
   if (out.length === 0) {
-    const xmls = await Promise.allSettled(RSSS.map((u) => fetch(u).then((r) => r.text())));
+    const rssFeeds = await fetchRSSFeeds();
+    const xmls = await Promise.allSettled(rssFeeds.map((u: string) => fetch(u).then((r) => r.text())));
     for (const r of xmls) {
       if (r.status !== 'fulfilled') continue;
       const xml = r.value;

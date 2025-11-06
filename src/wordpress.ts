@@ -24,6 +24,32 @@ export interface GeneratedArticle {
 }
 
 /**
+ * Remove metadata labels and unwanted section headers from AI output
+ */
+function sanitizeArticleContent(text: string): string {
+  if (!text) return '';
+
+  // Remove code fences only (keep code content if any)
+  let out = text.replace(/```[a-zA-Z0-9]*\n?|```/g, '');
+
+  // Drop lines that look like metadata or artificial section labels
+  const dropLine = /^(\s*)(title|category|tone|introduction|intro|body|conclusion|summary|overview|final thoughts)\s*:?\s*$/i;
+
+  out = out
+    .split(/\r?\n/)
+    .filter((line) => !dropLine.test(line))
+    .map((line) => line.replace(/^\s*(Introduction|Intro|Body|Conclusion|Summary|Overview|Final thoughts)\s*:\s*/i, ''))
+    .join('\n');
+
+  // Also strip accidental leading metadata remnants like "Title: ..." at start of paragraphs
+  out = out.replace(/\n?\s*(Title|Category|Tone)\s*:\s*[^\n]*\n?/gi, '\n');
+
+  // Collapse excessive blank lines
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+  return out;
+}
+
+/**
  * Search for relevant content based on keywords
  */
 async function findRelevantContent(keywords: string[], limit = 5) {
@@ -88,60 +114,82 @@ export async function generateArticle(request: ArticleRequest): Promise<Generate
   const targetWords = wordCounts[length];
 
   // Generate title
-  const titleSystem = `You are a professional blog title writer for Tuppu.fi. Create engaging, clear, and SEO-friendly titles.`;
+  const titleSystem = `You are a professional blog title writer for Tuppu.fi. Create SHORT, engaging, and SEO-friendly titles.`;
   const titlePrompt = `Create a compelling blog post title about: ${keywords.join(', ')}
 
 Category: ${category}
 Tone: ${tone}
 
-Generate ONE title only. Make it engaging and relevant. Do not add quotes or extra formatting.`;
+IMPORTANT RULES:
+- Maximum 79 characters (about 8-10 words)
+- ONE short, punchy title only
+- No subtitles, no colons, no explanations
+- No quotes or extra formatting
+- Direct and clear
 
-  const title = await generateWithLocalLLM(titleSystem, titlePrompt, {
-    maxTokens: 100,
+Example good titles:
+- "Understanding Tuppu Agentti"
+- "How AI Transforms Content"
+- "The Future of Web Agents"
+
+Generate ONE short title now:`;
+
+  let title = await generateWithLocalLLM(titleSystem, titlePrompt, {
+    maxTokens: 50,
     temperature: 0.7,
     timeoutMs: 15000000,
   });
 
+  // Truncate if still too long and clean up
+  title = title.trim().replace(/^["']|["']$/g, ''); // Remove quotes
+  title = title.split('\n')[0] || title; // Take only first line
+  if (title.length > 80) {
+    title = title.slice(0, 77) + '...';
+  }
+
   // Generate main article content
   const contentSystem = `You are a professional content writer for Tuppu.fi, a Finnish blog. Write in clear, engaging English.
-Write ${tone} content that is well-structured with paragraphs. Do not use markdown headers or formatting - just plain paragraphs.
+Write ${tone} content that is well-structured with paragraphs. Do not use markdown headers or formatting — just plain paragraphs.
+CRITICAL: Do not include any metadata or labels. Do NOT write lines like 'Title:', 'Category:', 'Tone:', 'Introduction:', 'Body:', 'Conclusion:' or similar. Start directly with the first paragraph of the article.
 Base your article on the provided source material but expand and synthesize the information into a cohesive piece.`;
 
   const contentPrompt = `Write a ${length} blog post (${targetWords} words) about: ${keywords.join(', ')}
 
-Title: ${title}
-Category: ${category}
-Tone: ${tone}
+Use these details only as guidance (do NOT print them):
+- Title: ${title}
+- Category: ${category}
+- Tone: ${tone}
 
 Reference Material:
 ${context}
 
 Write a complete article with:
-- An engaging introduction
-- Well-developed body paragraphs with specific information
-- A thoughtful conclusion
+- An engaging opening paragraph (without the word "Introduction:")
+- Well-developed body paragraphs with specific information (no "Body:")
+- A thoughtful closing paragraph (no "Conclusion:")
 - Natural flow between ideas
 
-Write in plain text paragraphs (no markdown headers). Make it informative and engaging.`;
+Output only plain text paragraphs. Do not include any labels or metadata.`;
 
-  const content = await generateWithLocalLLM(contentSystem, contentPrompt, {
+  const contentRaw = await generateWithLocalLLM(contentSystem, contentPrompt, {
     maxTokens: length === 'long' ? 2000 : length === 'medium' ? 1200 : 800,
     temperature: 0.7,
     timeoutMs: 60000000,
   });
+  const content = sanitizeArticleContent((contentRaw ?? '').toString());
 
   // Generate excerpt
   const excerptSystem = `You are a professional content summarizer. Create compelling excerpts that encourage readers to read more.`;
-  const excerptPrompt = `Create a brief 2-3 sentence excerpt (under 160 characters) for this article:
-
-Title: ${title}
+  const excerptPrompt = `Create a brief 2-3 sentence excerpt (under 160 characters) for this article.
 
 Content Preview:
-${content.slice(0, 500)}
+${"${PREVIEW_PLACEHOLDER}"}
 
-Write an engaging excerpt that captures the main point.`;
+Write an engaging excerpt that captures the main point. Do not include quotes or labels.`;
 
-  const excerpt = await generateWithLocalLLM(excerptSystem, excerptPrompt, {
+  const excerptPreview = content.slice(0, 500);
+  const excerptFilled = excerptPrompt.replace('${PREVIEW_PLACEHOLDER}', excerptPreview);
+  const excerpt = await generateWithLocalLLM(excerptSystem, excerptFilled, {
     maxTokens: 100,
     temperature: 0.6,
     timeoutMs: 15000000,
@@ -155,7 +203,7 @@ Write an engaging excerpt that captures the main point.`;
 
   return {
     title: title.replace(/^["']|["']$/g, '').trim(),
-    content: content.trim(),
+  content: content.trim(),
     excerpt: excerpt.trim(),
     sources,
   };
