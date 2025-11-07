@@ -79,7 +79,19 @@ async function findRelevantContent(keywords: string[], limit = 5) {
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.filter((x) => x.score >= 0.3).slice(0, limit);
+  
+  // Log top scores for debugging
+  console.log(`Keyword search: "${queryText}"`);
+  console.log('Top 5 scores:', scored.slice(0, 5).map(x => ({ title: x.title, score: x.score.toFixed(3) })));
+  
+  // Lower threshold to 0.2 to be more inclusive
+  const results = scored.filter((x) => x.score >= 0.2).slice(0, limit);
+  
+  if (results.length === 0) {
+    console.warn(`No results above threshold 0.2. Best score was: ${scored[0]?.score.toFixed(3)}`);
+  }
+  
+  return results;
 }
 
 /**
@@ -96,7 +108,12 @@ export async function generateArticle(request: ArticleRequest): Promise<Generate
   const relevantDocs = await findRelevantContent(keywords, 5);
 
   if (relevantDocs.length === 0) {
-    throw new Error('No relevant content found in the database. Please index some articles first.');
+    // Check if database has any content at all
+    const totalDocs = db.prepare('SELECT COUNT(*) as count FROM docs').get() as any;
+    if (totalDocs.count === 0) {
+      throw new Error('No content in database. Please run the indexer first by calling POST /reindex');
+    }
+    throw new Error(`No relevant content found for keywords: ${keywords.join(', ')}. Try broader or different keywords, or lower the similarity threshold.`);
   }
 
   // Build context from relevant documents
