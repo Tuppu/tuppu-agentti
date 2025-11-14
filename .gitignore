@@ -1,2 +1,5 @@
 .env
 /node_modules
+tuppu.db
+tuppu.db-shm
+tuppu.db-wal
