@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { WP_POSTS, WP_CATEGORIES, MAIN_RSS, BLOG } from './config.js';
+import { WP_POSTS, WP_CATEGORIES, MAIN_RSS, UNCATEGORIZED_FEED, BLOG } from './config.js';
 import { strip } from './utils.js';
 
 /**
@@ -23,22 +23,39 @@ async function fetchRSSFeeds(): Promise<string[]> {
     const response = await fetch(WP_CATEGORIES);
     if (!response.ok) {
       console.warn('Failed to fetch categories, using only main feed');
+      // Always try to include uncategorized feed as fallback
+      feeds.push(UNCATEGORIZED_FEED);
       return feeds;
     }
     
     const categories = (await response.json()) as any[];
     console.log(`Found ${categories.length} categories`);
     
+    // Track if we found an uncategorized category
+    let hasUncategorized = false;
+    
     for (const cat of categories) {
       if (cat.slug && cat.count > 0) { // Only include categories with posts
         feeds.push(`${BLOG}/category/${cat.slug}/feed/`);
+        if (cat.slug === 'uncategorized') {
+          hasUncategorized = true;
+        }
       }
+    }
+    
+    // Explicitly add uncategorized feed if it wasn't in the categories list
+    // or if it had 0 count (but might still have posts)
+    if (!hasUncategorized) {
+      console.log('Adding uncategorized feed explicitly');
+      feeds.push(UNCATEGORIZED_FEED);
     }
     
     console.log(`Generated ${feeds.length} RSS feed URLs`);
     return feeds;
   } catch (error) {
     console.error('Error fetching categories:', error);
+    // Always try to include uncategorized feed as fallback
+    feeds.push(UNCATEGORIZED_FEED);
     return feeds; // Return at least the main feed
   }
 }
